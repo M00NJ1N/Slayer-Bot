@@ -22,25 +22,40 @@ xp_data = {}
 money_data = {}
 warn_data = {}
 
+# ----------------- AUTOROLE -----------------
+autorole_name = DEFAULT_ROLE_NAME
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setautorole(ctx, *, role_name):
+    global autorole_name
+    role = discord.utils.get(ctx.guild.roles, name=role_name)
+    if role:
+        autorole_name = role_name
+        await ctx.send(f"Autorole set to {role_name}")
+    else:
+        await ctx.send("Role not found!")
+
+@bot.event
+async def on_member_join(member):
+    role = discord.utils.get(member.guild.roles, name=autorole_name)
+    if role:
+        try:
+            await member.add_roles(role)
+            print(f"Added role {autorole_name} to {member}")
+        except discord.Forbidden:
+            print(f"Cannot add role to {member}, missing permissions.")
+    # initialize xp and money
+    xp_data[member.id] = 0
+    money_data[member.id] = 100
+    warn_data[member.id] = 0
+
 # ----------------- EVENTS -----------------
 @bot.event
 async def on_ready():
     print(f"Bot online as {bot.user}")
     if not giveaway_loop.is_running():
         giveaway_loop.start()
-
-@bot.event
-async def on_member_join(member):
-    role = discord.utils.get(member.guild.roles, name=DEFAULT_ROLE_NAME)
-    if role:
-        try:
-            await member.add_roles(role)
-            print(f"Added role {DEFAULT_ROLE_NAME} to {member}")
-        except discord.Forbidden:
-            print(f"Cannot add role to {member}, missing permissions.")
-    xp_data[member.id] = 0
-    money_data[member.id] = 100
-    warn_data[member.id] = 0
 
 @bot.event
 async def on_message(message):
@@ -100,12 +115,6 @@ async def softban(ctx, member: discord.Member, *, reason=None):
 async def warn(ctx, member: discord.Member, *, reason=None):
     warn_data[member.id] = warn_data.get(member.id, 0) + 1
     await ctx.send(f"{member} warned. Total warns: {warn_data[member.id]} Reason: {reason}")
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def resetwarns(ctx, member: discord.Member):
-    warn_data[member.id] = 0
-    await ctx.send(f"{member}'s warnings have been reset.")
 
 # ----------------- DMS -----------------
 @bot.command()
@@ -185,6 +194,7 @@ async def pay(ctx, member: discord.Member, amount: int):
     money_data[member.id] = money_data.get(member.id, 0) + amount
     await ctx.send(f"{sender} paid {member} {amount} coins.")
 
+# Admin economy commands
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setbalance(ctx, member: discord.Member, amount: int):
@@ -192,13 +202,31 @@ async def setbalance(ctx, member: discord.Member, amount: int):
     await ctx.send(f"{member}'s balance set to {amount} coins.")
 
 @bot.command()
+@commands.has_permissions(administrator=True)
+async def addbalance(ctx, member: discord.Member, amount: int):
+    money_data[member.id] = money_data.get(member.id, 0) + amount
+    await ctx.send(f"Added {amount} coins to {member}.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def subtractbalance(ctx, member: discord.Member, amount: int):
+    money_data[member.id] = max(0, money_data.get(member.id, 0) - amount)
+    await ctx.send(f"Subtracted {amount} coins from {member}.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def resetbalance(ctx, member: discord.Member):
+    money_data[member.id] = 0
+    await ctx.send(f"{member}'s balance reset to 0.")
+
+@bot.command()
 async def leaderboard(ctx):
-    top_users = sorted(money_data.items(), key=lambda x: x[1], reverse=True)[:10]
-    msg = "**Leaderboard:**\n"
-    for i, (user_id, bal) in enumerate(top_users, 1):
+    top = sorted(money_data.items(), key=lambda x: x[1], reverse=True)[:10]
+    msg = "**💰 Top 10 Richest Members:**\n"
+    for i, (user_id, bal) in enumerate(top, 1):
         user = ctx.guild.get_member(user_id)
         if user:
-            msg += f"{i}. {user.display_name} - {bal} coins\n"
+            msg += f"{i}. {user} - {bal} coins\n"
     await ctx.send(msg)
 
 # ----------------- LEVELS -----------------
@@ -242,22 +270,45 @@ async def avatar(ctx, member: discord.Member = None):
     member = member or ctx.author
     await ctx.send(member.display_avatar.url)
 
+# Fun extra commands
+@bot.command()
+async def fliptext(ctx, *, text):
+    flipped = text[::-1].translate(str.maketrans("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", 
+                                                 "ɐqɔpǝɟƃɥᴉɾʞʅɯuodbɹsʇnʌʍxʎzABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+    await ctx.send(flipped)
+
+@bot.command()
+async def rps(ctx, choice: str):
+    options = ["rock","paper","scissors"]
+    user_choice = choice.lower()
+    if user_choice not in options:
+        await ctx.send("Choose rock, paper, or scissors!")
+        return
+    bot_choice = random.choice(options)
+    result = "Draw!"
+    if (user_choice=="rock" and bot_choice=="scissors") or \
+       (user_choice=="scissors" and bot_choice=="paper") or \
+       (user_choice=="paper" and bot_choice=="rock"):
+        result = "You win!"
+    elif user_choice == bot_choice:
+        result = "Draw!"
+    else:
+        result = "You lose!"
+    await ctx.send(f"You chose {user_choice}, bot chose {bot_choice}. {result}")
+
+@bot.command()
+async def _8ball(ctx, *, question):
+    responses = ["Yes","No","Maybe","Definitely","I don't think so","Absolutely","Ask again later"]
+    await ctx.send(f"🎱 {random.choice(responses)}")
+
 @bot.command()
 async def joke(ctx):
-    jokes = [
-        "Why did the chicken cross the road? To get to the other side!",
-        "I told my computer I needed a break, and it said: 'No problem, I'll go to sleep.'"
-    ]
+    jokes = ["Why did the chicken cross the road? To get to the other side!","I would tell you a UDP joke but you might not get it.","Parallel lines have so much in common… it’s a shame they’ll never meet."]
     await ctx.send(random.choice(jokes))
 
 @bot.command()
-async def meme(ctx):
-    memes = ["https://i.imgflip.com/1bij.jpg", "https://i.imgflip.com/26am.jpg"]
-    await ctx.send(random.choice(memes))
-
-@bot.command()
 async def ping(ctx):
-    await ctx.send(f"Pong! Latency: {round(bot.latency * 1000)}ms")
+    await ctx.send(f"Pong! 🏓 Latency: {round(bot.latency*1000)}ms")
 
 # ----------------- UTILITIES -----------------
 @bot.command()
@@ -280,6 +331,7 @@ async def userinfo(ctx, member: discord.Member = None):
     embed.add_field(name="Bot?", value=member.bot)
     embed.add_field(name="Created At", value=member.created_at.strftime("%Y-%m-%d %H:%M:%S"))
     embed.add_field(name="Joined At", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S"))
+    embed.add_field(name="Country", value="Unknown")  # placeholder
     await ctx.send(embed=embed)
 
 # ----------------- RUN BOT -----------------
