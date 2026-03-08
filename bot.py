@@ -3,259 +3,177 @@ from discord.ext import commands, tasks
 import os
 import random
 import asyncio
-import datetime
+from datetime import datetime, timedelta
 
+# -----------------------------
+# Environment Token
+# -----------------------------
 TOKEN = os.getenv("TOKEN")
+if TOKEN is None:
+    raise ValueError("No bot token found! Set the TOKEN environment variable.")
 
-intents = discord.Intents.all()
+# -----------------------------
+# Bot setup
+# -----------------------------
+intents = discord.Intents.all()  # necessary for members, messages, reactions
 bot = commands.Bot(command_prefix="!", intents=intents)
+bot.remove_command("help")  # we will add a custom help command
 
-warnings = {}
-economy = {}
-reminders = []
-
-# ---------------- READY EVENT ----------------
-
+# -----------------------------
+# Events
+# -----------------------------
 @bot.event
 async def on_ready():
     print(f"Bot online as {bot.user}")
 
-# ---------------- AUTOROLE ----------------
-
 @bot.event
 async def on_member_join(member):
+    # Autorole
     role = discord.utils.get(member.guild.roles, name="Member")
     if role:
         try:
             await member.add_roles(role)
+            print(f"Added Member role to {member}")
+        except:
+            print(f"Cannot add role to {member}")
+
+# -----------------------------
+# Moderation Commands
+# -----------------------------
+@bot.command()
+@commands.has_permissions(ban_members=True)
+async def ban(ctx, member: discord.Member, duration: int = None, *, reason=None):
+    """Ban a member. Optionally unban after duration (minutes)."""
+    await member.ban(reason=reason)
+    await ctx.send(f"{member} has been banned.")
+    if duration:
+        await asyncio.sleep(duration*60)
+        try:
+            await ctx.guild.unban(member)
+            await ctx.send(f"{member} has been unbanned after {duration} minutes.")
         except:
             pass
 
-# ---------------- BASIC COMMANDS ----------------
-
-@bot.command()
-async def ping(ctx):
-    await ctx.send(f"Pong! {round(bot.latency*1000)}ms")
-
-@bot.command()
-async def coinflip(ctx):
-    await ctx.send(random.choice(["Heads", "Tails"]))
-
-@bot.command()
-async def roll(ctx, sides: int = 6):
-    await ctx.send(f"You rolled {random.randint(1,sides)}")
-
-# ---------------- SERVER INFO ----------------
-
-@bot.command()
-async def serverinfo(ctx):
-    guild = ctx.guild
-    embed = discord.Embed(title=guild.name)
-    embed.add_field(name="Members", value=guild.member_count)
-    embed.add_field(name="Roles", value=len(guild.roles))
-    embed.add_field(name="Owner", value=guild.owner)
-    await ctx.send(embed=embed)
-
-@bot.command()
-async def userinfo(ctx, member: discord.Member=None):
-    member = member or ctx.author
-    embed = discord.Embed(title=str(member))
-    embed.add_field(name="ID", value=member.id)
-    embed.add_field(name="Joined", value=member.joined_at)
-    embed.add_field(name="Top Role", value=member.top_role)
-    await ctx.send(embed=embed)
-
-# ---------------- PURGE ----------------
-
-@bot.command()
-@commands.has_permissions(manage_messages=True)
-async def purge(ctx, amount: int):
-    await ctx.channel.purge(limit=amount)
-    await ctx.send(f"Deleted {amount} messages", delete_after=3)
-
-# ---------------- WARN SYSTEM ----------------
-
-@bot.command()
-@commands.has_permissions(manage_messages=True)
-async def warn(ctx, member: discord.Member, *, reason="No reason"):
-    if member.id not in warnings:
-        warnings[member.id] = []
-
-    warnings[member.id].append(reason)
-
-    await ctx.send(f"{member} warned: {reason}")
-
-@bot.command()
-async def warnings(ctx, member: discord.Member):
-    if member.id not in warnings:
-        await ctx.send("No warnings")
-        return
-
-    warn_list = warnings[member.id]
-    text = "\n".join(warn_list)
-
-    await ctx.send(f"Warnings for {member}:\n{text}")
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def clearwarnings(ctx, member: discord.Member):
-    warnings[member.id] = []
-    await ctx.send("Warnings cleared")
-
-# ---------------- MODERATION ----------------
-
 @bot.command()
 @commands.has_permissions(kick_members=True)
-async def kick(ctx, member: discord.Member, *, reason="No reason"):
+async def kick(ctx, member: discord.Member, *, reason=None):
     await member.kick(reason=reason)
-    await ctx.send(f"{member} kicked")
-
-@bot.command()
-@commands.has_permissions(ban_members=True)
-async def ban(ctx, member: discord.Member, *, reason="No reason"):
-    await member.ban(reason=reason)
-    await ctx.send(f"{member} banned")
-
-# ---------------- TEMP BAN ----------------
-
-@bot.command()
-@commands.has_permissions(ban_members=True)
-async def tempban(ctx, member: discord.Member, minutes: int, *, reason="No reason"):
-    await member.ban(reason=reason)
-    await ctx.send(f"{member} banned for {minutes} minutes")
-
-    await asyncio.sleep(minutes * 60)
-
-    await ctx.guild.unban(member)
-    await ctx.send(f"{member} unbanned")
-
-# ---------------- TIMEOUT ----------------
+    await ctx.send(f"{member} has been kicked.")
 
 @bot.command()
 @commands.has_permissions(moderate_members=True)
 async def timeout(ctx, member: discord.Member, minutes: int):
-    until = discord.utils.utcnow() + datetime.timedelta(minutes=minutes)
-    await member.timeout(until)
-    await ctx.send(f"{member} timed out for {minutes} minutes")
-
-# ---------------- ECONOMY ----------------
-
-def get_balance(user):
-    if user not in economy:
-        economy[user] = 100
-    return economy[user]
-
-@bot.command()
-async def balance(ctx):
-    bal = get_balance(ctx.author.id)
-    await ctx.send(f"💰 Balance: {bal}")
-
-@bot.command()
-async def daily(ctx):
-    money = random.randint(50,200)
-    economy[ctx.author.id] = get_balance(ctx.author.id) + money
-    await ctx.send(f"You got {money} coins")
-
-@bot.command()
-async def give(ctx, member: discord.Member, amount:int):
-    if get_balance(ctx.author.id) < amount:
-        await ctx.send("Not enough money")
-        return
-
-    economy[ctx.author.id] -= amount
-    economy[member.id] = get_balance(member.id) + amount
-
-    await ctx.send("Money sent")
-
-# ---------------- BET GAME ----------------
-
-@bot.command()
-async def coinflipbet(ctx, amount:int):
-    if get_balance(ctx.author.id) < amount:
-        await ctx.send("Not enough money")
-        return
-
-    result = random.choice(["win","lose"])
-
-    if result == "win":
-        economy[ctx.author.id] += amount
-        await ctx.send("You won!")
-    else:
-        economy[ctx.author.id] -= amount
-        await ctx.send("You lost")
-
-# ---------------- GAMES ----------------
-
-@bot.command()
-async def rps(ctx, choice):
-    options = ["rock","paper","scissors"]
-    bot_choice = random.choice(options)
-
-    if choice == bot_choice:
-        result = "Tie"
-    elif (choice=="rock" and bot_choice=="scissors") or (choice=="paper" and bot_choice=="rock") or (choice=="scissors" and bot_choice=="paper"):
-        result="You win"
-    else:
-        result="You lose"
-
-    await ctx.send(f"I chose {bot_choice}. {result}")
-
-@bot.command()
-async def guess(ctx):
-    number = random.randint(1,10)
-    await ctx.send("Guess 1-10")
-
-    def check(m):
-        return m.author == ctx.author
-
-    msg = await bot.wait_for("message", check=check)
-
-    if int(msg.content) == number:
-        await ctx.send("Correct!")
-    else:
-        await ctx.send(f"Wrong. Number was {number}")
-
-# ---------------- QUOTE ----------------
-
-quotes = []
-
-@bot.command()
-async def addquote(ctx, *, text):
-    quotes.append(text)
-    await ctx.send("Quote added")
-
-@bot.command()
-async def quote(ctx):
-    if not quotes:
-        await ctx.send("No quotes yet")
-    else:
-        await ctx.send(random.choice(quotes))
-
-# ---------------- REMINDER ----------------
-
-@bot.command()
-async def remind(ctx, minutes:int, *, message):
-    await ctx.send(f"I will remind you in {minutes} minutes")
-
-    await asyncio.sleep(minutes*60)
-
-    await ctx.send(f"{ctx.author.mention} reminder: {message}")
-
-# ---------------- DM ALL ----------------
+    duration = minutes * 60
+    await member.timeout(discord.utils.utcnow() + timedelta(seconds=duration))
+    await ctx.send(f"{member} timed out for {minutes} minutes.")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def dmall(ctx, *, message):
+    """Send a DM to all members (non-bots)."""
     count = 0
-
     for member in ctx.guild.members:
         if not member.bot:
             try:
                 await member.send(message)
                 count += 1
             except:
-                pass
+                continue
+    await ctx.send(f"Sent DM to {count} members.")
 
-    await ctx.send(f"Sent to {count} users")
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def delete_dm(ctx, user: discord.User, limit: int = 100):
+    """Delete recent DMs the bot sent to a user."""
+    try:
+        channel = await user.create_dm()
+        async for msg in channel.history(limit=limit):
+            if msg.author == bot.user:
+                await msg.delete()
+        await ctx.send(f"Deleted last {limit} DMs sent to {user}.")
+    except Exception as e:
+        await ctx.send(f"Failed to delete DMs: {e}")
 
+# -----------------------------
+# Fun Commands
+# -----------------------------
+@bot.command()
+async def roll(ctx, dice: str):
+    """Roll dice in NdN format (e.g., 2d6)."""
+    try:
+        rolls, limit = map(int, dice.lower().split("d"))
+        results = [random.randint(1, limit) for _ in range(rolls)]
+        await ctx.send(f"{ctx.author.mention} rolled {results} = {sum(results)}")
+    except:
+        await ctx.send("Format has to be NdN (e.g., 2d6)")
+
+@bot.command()
+async def coin(ctx):
+    await ctx.send(f"{ctx.author.mention} flipped a coin and got **{random.choice(['Heads','Tails'])}**")
+
+@bot.command()
+async def say(ctx, *, message):
+    await ctx.send(message)
+
+# -----------------------------
+# Utility Commands
+# -----------------------------
+@bot.command()
+async def ping(ctx):
+    await ctx.send(f"Pong! Latency: {round(bot.latency*1000)}ms")
+
+@bot.command()
+async def serverinfo(ctx):
+    embed = discord.Embed(title=f"{ctx.guild.name} Info", color=discord.Color.blue())
+    embed.add_field(name="Owner", value=ctx.guild.owner)
+    embed.add_field(name="Members", value=ctx.guild.member_count)
+    embed.add_field(name="Roles", value=len(ctx.guild.roles))
+    embed.add_field(name="Text Channels", value=len(ctx.guild.text_channels))
+    embed.add_field(name="Voice Channels", value=len(ctx.guild.voice_channels))
+    embed.set_footer(text=f"Server ID: {ctx.guild.id}")
+    await ctx.send(embed=embed)
+
+# -----------------------------
+# Giveaways System
+# -----------------------------
+giveaways = {}  # {message_id: {"prize": str, "end": datetime, "users": set()}}
+
+@bot.command()
+async def giveaway(ctx, duration: int, *, prize):
+    """Start a giveaway in minutes."""
+    end_time = datetime.utcnow() + timedelta(minutes=duration)
+    msg = await ctx.send(f"🎉 **GIVEAWAY** 🎉\nPrize: {prize}\nReact with 🎉 to enter!\nEnds at {end_time} UTC")
+    await msg.add_reaction("🎉")
+    giveaways[msg.id] = {"prize": prize, "end": end_time, "users": set()}
+    
+    while datetime.utcnow() < end_time:
+        await asyncio.sleep(5)
+    
+    msg = await ctx.fetch_message(msg.id)
+    users = set()
+    for reaction in msg.reactions:
+        if reaction.emoji == "🎉":
+            async for user in reaction.users():
+                if not user.bot:
+                    users.add(user)
+    if users:
+        winner = random.choice(list(users))
+        await ctx.send(f"🎉 Congratulations {winner.mention}! You won **{prize}**")
+    else:
+        await ctx.send(f"No participants for **{prize}**.")
+
+# -----------------------------
+# Custom Help
+# -----------------------------
+@bot.command()
+async def help(ctx):
+    commands_list = [
+        "ping", "say", "coin", "roll", "serverinfo", "ban", "kick", "timeout",
+        "dmall", "delete_dm", "giveaway"
+    ]
+    await ctx.send(f"Available commands: {', '.join(commands_list)}")
+
+# -----------------------------
+# Run bot
+# -----------------------------
 bot.run(TOKEN)
