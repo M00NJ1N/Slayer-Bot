@@ -6,7 +6,7 @@ import random
 from datetime import datetime, timedelta
 
 # ----------------- CONFIG -----------------
-TOKEN = os.getenv("TOKEN")
+TOKEN = os.getenv("TOKEN")  # Railway Environment Variable
 if not TOKEN:
     raise ValueError("No bot token found! Set the TOKEN environment variable!")
 
@@ -17,10 +17,10 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=COMMAND_PREFIX, intents=intents)
 
 # ----------------- DATABASE SIMULATION -----------------
-# For XP, economy, warnings
 xp_data = {}
 money_data = {}
 warn_data = {}
+giveaways = {}
 
 # ----------------- EVENTS -----------------
 @bot.event
@@ -35,19 +35,16 @@ async def on_member_join(member):
     if role:
         try:
             await member.add_roles(role)
-            print(f"Added role {DEFAULT_ROLE_NAME} to {member}")
         except discord.Forbidden:
             print(f"Cannot add role to {member}, missing permissions.")
-    # initialize xp and money
     xp_data[member.id] = 0
-    money_data[member.id] = 100  # starting money
+    money_data[member.id] = 100
     warn_data[member.id] = 0
 
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
-    # XP system
     xp_data[message.author.id] = xp_data.get(message.author.id, 0) + random.randint(5, 15)
     await bot.process_commands(message)
 
@@ -87,16 +84,6 @@ async def purge(ctx, limit: int):
     await ctx.send(f"Deleted {len(deleted)} messages.", delete_after=5)
 
 @bot.command()
-@commands.has_permissions(ban_members=True)
-async def softban(ctx, member: discord.Member, *, reason=None):
-    try:
-        await member.ban(reason=reason, delete_message_days=7)
-        await member.unban(reason="Softban completed")
-        await ctx.send(f"{member} was softbanned.")
-    except discord.Forbidden:
-        await ctx.send("Cannot softban this member.")
-
-@bot.command()
 @commands.has_permissions(administrator=True)
 async def warn(ctx, member: discord.Member, *, reason=None):
     warn_data[member.id] = warn_data.get(member.id, 0) + 1
@@ -119,11 +106,9 @@ async def dmall(ctx, *, message):
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def deldms(ctx):
-    await ctx.send("Cannot delete other users' DMs due to Discord API restrictions.")
+    await ctx.send("Cannot delete DMs due to Discord API restrictions.")
 
 # ----------------- GIVEAWAYS -----------------
-giveaways = {}
-
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def giveaway(ctx, duration: int, *, prize):
@@ -160,8 +145,7 @@ async def on_reaction_add(reaction, user):
 @bot.command()
 async def balance(ctx, member: discord.Member = None):
     member = member or ctx.author
-    bal = money_data.get(member.id, 0)
-    await ctx.send(f"{member} has {bal} coins.")
+    await ctx.send(f"{member} has {money_data.get(member.id, 0)} coins.")
 
 @bot.command()
 async def daily(ctx):
@@ -195,7 +179,7 @@ async def coinflip(ctx):
 
 @bot.command()
 async def roll(ctx, sides: int = 6):
-    await ctx.send(f"{ctx.author.mention} rolled a {sides}-sided dice: {random.randint(1, sides)}")
+    await ctx.send(f"{ctx.author.mention} rolled a {random.randint(1, sides)} on a {sides}-sided dice.")
 
 @bot.command()
 async def hug(ctx, member: discord.Member = None):
@@ -203,14 +187,14 @@ async def hug(ctx, member: discord.Member = None):
     await ctx.send(f"{ctx.author.mention} hugs {member.mention} 🤗")
 
 @bot.command()
-async def kiss(ctx, member: discord.Member = None):
-    member = member or ctx.author
-    await ctx.send(f"{ctx.author.mention} kisses {member.mention} 😘")
-
-@bot.command()
 async def slap(ctx, member: discord.Member = None):
     member = member or ctx.author
     await ctx.send(f"{ctx.author.mention} slaps {member.mention} 👋")
+
+@bot.command()
+async def kiss(ctx, member: discord.Member = None):
+    member = member or ctx.author
+    await ctx.send(f"{ctx.author.mention} kisses {member.mention} 😘")
 
 @bot.command()
 async def say(ctx, *, text):
@@ -225,7 +209,7 @@ async def avatar(ctx, member: discord.Member = None):
 @bot.command()
 async def serverinfo(ctx):
     g = ctx.guild
-    embed = discord.Embed(title=f"{g.name}", description=f"ID: {g.id}", color=discord.Color.blue())
+    embed = discord.Embed(title=f"{g.name}", color=discord.Color.blue())
     embed.add_field(name="Owner", value=g.owner)
     embed.add_field(name="Members", value=g.member_count)
     embed.add_field(name="Text Channels", value=len(g.text_channels))
