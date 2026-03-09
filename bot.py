@@ -1,290 +1,359 @@
-import os
 import discord
 from discord.ext import commands, tasks
-import asyncio
 import random
-from datetime import datetime, timedelta
-
-# ----------------- CONFIG -----------------
-TOKEN = os.getenv("TOKEN")
-if not TOKEN:
-    raise ValueError("No bot token found! Set the TOKEN environment variable!")
-
-COMMAND_PREFIX = "!"
-DEFAULT_ROLE_NAME = "Member"
+import json
+import asyncio
+import datetime
 
 intents = discord.Intents.all()
-bot = commands.Bot(command_prefix=COMMAND_PREFIX, intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ----------------- DATABASE SIMULATION -----------------
-xp_data = {}
-money_data = {}
-warn_data = {}
+OWNER_ID = 1169273992289456341
 
-# ----------------- EVENTS -----------------
+economy = {}
+autorole_id = None
+
+# ---------------- ECONOMY HELPERS ---------------- #
+
+def get_balance(user):
+    return economy.get(str(user), 0)
+
+def add_balance(user, amount):
+    economy[str(user)] = get_balance(user) + amount
+
+def remove_balance(user, amount):
+    economy[str(user)] = max(0, get_balance(user) - amount)
+
+# ---------------- READY ---------------- #
+
 @bot.event
 async def on_ready():
-    print(f"Bot online as {bot.user}")
-    if not giveaway_loop.is_running():
-        giveaway_loop.start()
+    print(f"Logged in as {bot.user}")
+
+# ---------------- JOIN EVENT ---------------- #
 
 @bot.event
 async def on_member_join(member):
-    # Autorole
-    role = discord.utils.get(member.guild.roles, name=DEFAULT_ROLE_NAME)
-    if role:
-        try:
+    if autorole_id:
+        role = member.guild.get_role(autorole_id)
+        if role:
             await member.add_roles(role)
-            print(f"Added role {DEFAULT_ROLE_NAME} to {member}")
-        except discord.Forbidden:
-            print(f"Cannot add role to {member}, missing permissions.")
-    # initialize xp and money
-    xp_data[member.id] = 0
-    money_data[member.id] = 100
-    warn_data[member.id] = 0
 
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-    # XP system
-    xp_data[message.author.id] = xp_data.get(message.author.id, 0) + random.randint(5, 15)
-    await bot.process_commands(message)
-
-# ----------------- MODERATION -----------------
-@bot.command()
-@commands.has_permissions(ban_members=True)
-async def ban(ctx, member: discord.Member, days: int = 0, *, reason=None):
-    try:
-        await member.ban(reason=reason, delete_message_days=days)
-        await ctx.send(f"{member} was banned. Reason: {reason}")
-    except discord.Forbidden:
-        await ctx.send("I do not have permission to ban that member.")
-
-@bot.command()
-@commands.has_permissions(kick_members=True)
-async def kick(ctx, member: discord.Member, *, reason=None):
-    try:
-        await member.kick(reason=reason)
-        await ctx.send(f"{member} was kicked. Reason: {reason}")
-    except discord.Forbidden:
-        await ctx.send("I cannot kick that member.")
-
-@bot.command()
-@commands.has_permissions(moderate_members=True)
-async def timeout(ctx, member: discord.Member, minutes: int, *, reason=None):
-    try:
-        until = datetime.utcnow() + timedelta(minutes=minutes)
-        await member.timeout(until, reason=reason)
-        await ctx.send(f"{member} timed out for {minutes} minutes. Reason: {reason}")
-    except discord.Forbidden:
-        await ctx.send("I cannot timeout that member.")
-
-@bot.command()
-@commands.has_permissions(manage_messages=True)
-async def purge(ctx, limit: int):
-    deleted = await ctx.channel.purge(limit=limit)
-    await ctx.send(f"Deleted {len(deleted)} messages.", delete_after=5)
-
-@bot.command()
-@commands.has_permissions(ban_members=True)
-async def softban(ctx, member: discord.Member, *, reason=None):
-    try:
-        await member.ban(reason=reason, delete_message_days=7)
-        await member.unban(reason="Softban completed")
-        await ctx.send(f"{member} was softbanned.")
-    except discord.Forbidden:
-        await ctx.send("Cannot softban this member.")
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def warn(ctx, member: discord.Member, *, reason=None):
-    warn_data[member.id] = warn_data.get(member.id, 0) + 1
-    await ctx.send(f"{member} warned. Total warns: {warn_data[member.id]} Reason: {reason}")
-
-# ----------------- DMS -----------------
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def dmall(ctx, *, message):
-    success = 0
-    for member in ctx.guild.members:
-        if not member.bot:
-            try:
-                await member.send(message)
-                success += 1
-            except:
-                pass
-    await ctx.send(f"DM sent to {success} members.")
-
-# ----------------- GIVEAWAYS -----------------
-giveaways = {}
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def giveaway(ctx, duration: int, *, prize):
-    if ctx.guild.id in giveaways:
-        await ctx.send("A giveaway is already running!")
-        return
-    end_time = datetime.utcnow() + timedelta(minutes=duration)
-    giveaways[ctx.guild.id] = {"channel": ctx.channel, "prize": prize, "end": end_time, "entries": set()}
-    await ctx.send(f"🎉 Giveaway started for **{prize}**! Ends in {duration} minutes.\nReact with 🎉 to enter!")
-
-@tasks.loop(seconds=30)
-async def giveaway_loop():
-    to_remove = []
-    for guild_id, data in giveaways.items():
-        if datetime.utcnow() >= data["end"]:
-            channel = data["channel"]
-            if data["entries"]:
-                winner = random.choice(list(data["entries"]))
-                await channel.send(f"🎉 Giveaway for **{data['prize']}** ended! Winner: {winner.mention}")
-            else:
-                await channel.send(f"Giveaway for **{data['prize']}** ended with no entries.")
-            to_remove.append(guild_id)
-    for guild_id in to_remove:
-        giveaways.pop(guild_id, None)
-
-@bot.event
-async def on_reaction_add(reaction, user):
-    if reaction.emoji == "🎉" and not user.bot:
-        for data in giveaways.values():
-            if data["channel"].id == reaction.message.channel.id:
-                data["entries"].add(user)
-
-# ----------------- ECONOMY -----------------
-@bot.command()
-async def balance(ctx, member: discord.Member = None):
-    member = member or ctx.author
-    bal = money_data.get(member.id, 0)
-    await ctx.send(f"{member} has {bal} coins.")
-
-@bot.command()
-async def daily(ctx):
-    user = ctx.author
-    coins = random.randint(50, 200)
-    money_data[user.id] = money_data.get(user.id, 0) + coins
-    await ctx.send(f"{user} collected {coins} coins today!")
-
-@bot.command()
-async def pay(ctx, member: discord.Member, amount: int):
-    sender = ctx.author
-    if money_data.get(sender.id, 0) < amount:
-        await ctx.send("Not enough coins!")
-        return
-    money_data[sender.id] -= amount
-    money_data[member.id] = money_data.get(member.id, 0) + amount
-    await ctx.send(f"{sender} paid {member} {amount} coins.")
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def setbalance(ctx, member: discord.Member, amount: int):
-    money_data[member.id] = amount
-    await ctx.send(f"{member}'s balance is now {amount} coins.")
-
-# ----------------- LEVELS -----------------
-@bot.command()
-async def level(ctx, member: discord.Member = None):
-    member = member or ctx.author
-    xp = xp_data.get(member.id, 0)
-    lvl = xp // 100
-    await ctx.send(f"{member} is level {lvl} with {xp} XP.")
-
-# ----------------- FUN COMMANDS -----------------
-@bot.command()
-async def coinflip(ctx):
-    await ctx.send(f"🪙 {ctx.author.mention} flipped {random.choice(['Heads','Tails'])}")
-
-@bot.command()
-async def roll(ctx, sides: int = 6):
-    await ctx.send(f"{ctx.author.mention} rolled a {sides}-sided dice: {random.randint(1, sides)}")
-
-@bot.command()
-async def hug(ctx, member: discord.Member = None):
-    member = member or ctx.author
-    await ctx.send(f"{ctx.author.mention} hugs {member.mention} 🤗")
-
-@bot.command()
-async def kiss(ctx, member: discord.Member = None):
-    member = member or ctx.author
-    await ctx.send(f"{ctx.author.mention} kisses {member.mention} 😘")
-
-@bot.command()
-async def slap(ctx, member: discord.Member = None):
-    member = member or ctx.author
-    await ctx.send(f"{ctx.author.mention} slaps {member.mention} 👋")
-
-@bot.command()
-async def say(ctx, *, text):
-    await ctx.send(text)
-
-@bot.command()
-async def avatar(ctx, member: discord.Member = None):
-    member = member or ctx.author
-    await ctx.send(member.display_avatar.url)
+# ---------------- BASIC COMMANDS ---------------- #
 
 @bot.command()
 async def ping(ctx):
-    await ctx.send(f"Pong! Latency: {round(bot.latency*1000)}ms")
+    await ctx.send(f"Pong! {round(bot.latency*1000)}ms")
 
-# ----------------- UTILITIES -----------------
+@bot.command()
+async def avatar(ctx, member: discord.Member=None):
+    member = member or ctx.author
+    await ctx.send(member.avatar.url)
+
+@bot.command()
+async def say(ctx, *, message):
+    await ctx.send(message)
+
+# ---------------- USER INFO ---------------- #
+
+@bot.command()
+async def userinfo(ctx, member: discord.Member=None):
+    member = member or ctx.author
+
+    embed = discord.Embed(title="User Info")
+    embed.add_field(name="Name", value=member.name)
+    embed.add_field(name="ID", value=member.id)
+    embed.add_field(name="Joined", value=member.joined_at)
+    embed.set_thumbnail(url=member.avatar.url)
+
+    await ctx.send(embed=embed)
+
+# ---------------- SERVER INFO ---------------- #
+
 @bot.command()
 async def serverinfo(ctx):
     g = ctx.guild
-    embed = discord.Embed(title=f"{g.name}", description=f"ID: {g.id}", color=discord.Color.blue())
-    embed.add_field(name="Owner", value=g.owner)
+
+    embed = discord.Embed(title=g.name)
     embed.add_field(name="Members", value=g.member_count)
-    embed.add_field(name="Text Channels", value=len(g.text_channels))
-    embed.add_field(name="Voice Channels", value=len(g.voice_channels))
-    embed.add_field(name="Roles", value=len(g.roles))
-    embed.add_field(name="Created At", value=g.created_at.strftime("%Y-%m-%d %H:%M:%S"))
+    embed.add_field(name="Channels", value=len(g.channels))
+    embed.add_field(name="Created", value=g.created_at)
+
     await ctx.send(embed=embed)
+
+# ---------------- ECONOMY ---------------- #
 
 @bot.command()
-async def userinfo(ctx, member: discord.Member = None):
+async def balance(ctx, member: discord.Member=None):
     member = member or ctx.author
-    embed = discord.Embed(title=f"{member}", color=discord.Color.green())
-    embed.add_field(name="ID", value=member.id)
-    embed.add_field(name="Bot?", value=member.bot)
-    embed.add_field(name="Created At", value=member.created_at.strftime("%Y-%m-%d %H:%M:%S"))
-    embed.add_field(name="Joined At", value=member.joined_at.strftime("%Y-%m-%d %H:%M:%S"))
-    # Placeholder country info
-    embed.add_field(name="Country", value="Unknown (Discord API does not allow real IP access)")
-    await ctx.send(embed=embed)
+    await ctx.send(f"{member.name} has {get_balance(member.id)} coins")
 
-# ----------------- ADMIN COMMANDS -----------------
+@bot.command()
+async def daily(ctx):
+    amount = random.randint(100,300)
+    add_balance(ctx.author.id, amount)
+    await ctx.send(f"You got {amount} coins!")
+
+@bot.command()
+async def pay(ctx, member: discord.Member, amount:int):
+    if get_balance(ctx.author.id) < amount:
+        return await ctx.send("Not enough money")
+
+    remove_balance(ctx.author.id, amount)
+    add_balance(member.id, amount)
+
+    await ctx.send("Payment complete")
+
+@bot.command()
+async def leaderboard(ctx):
+
+    board = sorted(economy.items(), key=lambda x: x[1], reverse=True)
+
+    text = ""
+    for i, data in enumerate(board[:10]):
+        user = bot.get_user(int(data[0]))
+        text += f"{i+1}. {user} - {data[1]}\n"
+
+    await ctx.send(f"```{text}```")
+
+# ---------------- ADMIN ECONOMY ---------------- #
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def setbalance(ctx, member: discord.Member, amount:int):
+    economy[str(member.id)] = amount
+    await ctx.send("Balance updated")
+
+# ---------------- FUN ---------------- #
+
+@bot.command()
+async def coinflip(ctx):
+    await ctx.send(random.choice(["Heads","Tails"]))
+
+@bot.command()
+async def roll(ctx, sides:int=6):
+    await ctx.send(random.randint(1,sides))
+
+@bot.command()
+async def hug(ctx, member: discord.Member):
+    await ctx.send(f"{ctx.author.mention} hugs {member.mention}")
+
+@bot.command()
+async def slap(ctx, member: discord.Member):
+    await ctx.send(f"{ctx.author.mention} slaps {member.mention}")
+
+# ---------------- RPG ---------------- #
+
+@bot.command()
+async def crime(ctx):
+
+    success = random.choice([True,False])
+
+    if success:
+        money = random.randint(50,200)
+        add_balance(ctx.author.id, money)
+        await ctx.send(f"Crime success! +{money} coins")
+    else:
+        fine = random.randint(20,100)
+        remove_balance(ctx.author.id, fine)
+        await ctx.send(f"You got caught! -{fine}")
+
+@bot.command()
+async def loot(ctx):
+
+    items = ["Sword","Shield","Potion","Gold","Gem"]
+    item = random.choice(items)
+
+    await ctx.send(f"You opened a crate and found {item}")
+
+@bot.command()
+async def quest(ctx):
+
+    reward = random.randint(200,500)
+    add_balance(ctx.author.id, reward)
+
+    await ctx.send(f"Quest complete! +{reward} coins")
+
+# ---------------- DUEL ---------------- #
+
+@bot.command()
+async def duel(ctx, opponent: discord.Member):
+
+    if opponent.bot:
+        return await ctx.send("Can't duel bots")
+
+    msg = await ctx.send(f"{opponent.mention} react ⚔️ to accept duel")
+    await msg.add_reaction("⚔️")
+
+    def check(reaction,user):
+        return user == opponent and str(reaction.emoji) == "⚔️"
+
+    try:
+        await bot.wait_for("reaction_add", timeout=30, check=check)
+    except:
+        return await ctx.send("Duel expired")
+
+    winner = random.choice([ctx.author,opponent])
+
+    reward = random.randint(50,150)
+    add_balance(winner.id, reward)
+
+    await ctx.send(f"{winner.mention} won the duel! +{reward}")
+
+# ---------------- BLACKJACK ---------------- #
+
+@bot.command()
+async def blackjack(ctx):
+
+    player = random.randint(15,21)
+    dealer = random.randint(15,21)
+
+    if player > dealer:
+        win = random.randint(50,200)
+        add_balance(ctx.author.id, win)
+        await ctx.send(f"You win! {player} vs {dealer} (+{win})")
+    else:
+        await ctx.send(f"You lose {player} vs {dealer}")
+
+# ---------------- TRIVIA ---------------- #
+
+questions = [
+("What planet is closest to the sun?","mercury"),
+("How many continents are there?","7"),
+("What is 5+7?","12")
+]
+
+@bot.command()
+async def trivia(ctx):
+
+    q,a = random.choice(questions)
+
+    await ctx.send(q)
+
+    def check(m):
+        return m.channel == ctx.channel
+
+    try:
+        msg = await bot.wait_for("message",timeout=20,check=check)
+    except:
+        return await ctx.send("Time up")
+
+    if msg.content.lower() == a:
+        add_balance(msg.author.id,100)
+        await ctx.send("Correct +100 coins")
+    else:
+        await ctx.send("Wrong")
+
+# ---------------- MODERATION ---------------- #
+
+@bot.command()
+@commands.has_permissions(kick_members=True)
+async def kick(ctx, member:discord.Member, *, reason=None):
+    await member.kick(reason=reason)
+    await ctx.send("User kicked")
+
+@bot.command()
+@commands.has_permissions(ban_members=True)
+async def ban(ctx, member:discord.Member, *, reason=None):
+    await member.ban(reason=reason)
+    await ctx.send("User banned")
+
+@bot.command()
+@commands.has_permissions(manage_messages=True)
+async def purge(ctx, amount:int):
+    await ctx.channel.purge(limit=amount+1)
+
+# ---------------- LOCK / UNLOCK ---------------- #
+
+@bot.command()
+@commands.has_permissions(manage_channels=True)
+async def lock(ctx):
+
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=False)
+    await ctx.send("Channel locked")
+
+@bot.command()
+@commands.has_permissions(manage_channels=True)
+async def unlock(ctx):
+
+    await ctx.channel.set_permissions(ctx.guild.default_role, send_messages=True)
+    await ctx.send("Channel unlocked")
+
+# ---------------- ROLE SYSTEM ---------------- #
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def autorole(ctx, role: discord.Role):
-    global DEFAULT_ROLE_NAME
-    DEFAULT_ROLE_NAME = role.name
-    await ctx.send(f"Set autorole to {role.name}")
+    global autorole_id
+    autorole_id = role.id
+    await ctx.send("Autorole set")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def roleall(ctx, role: discord.Role):
-    success = 0
+
     for member in ctx.guild.members:
-        if not member.bot and role not in member.roles:
+        try:
+            await member.add_roles(role)
+        except:
+            pass
+
+    await ctx.send("Role added to everyone")
+
+# ---------------- CLIP ---------------- #
+
+@bot.command()
+async def clip(ctx):
+
+    if not ctx.message.reference:
+        return await ctx.send("Reply to a message")
+
+    msg = await ctx.channel.fetch_message(ctx.message.reference.message_id)
+
+    embed = discord.Embed(title="Clipped Message")
+    embed.add_field(name="Author",value=msg.author)
+    embed.add_field(name="Time",value=msg.created_at)
+    embed.add_field(name="Message",value=msg.content)
+
+    await ctx.author.send(embed=embed)
+
+    await ctx.send("Sent to your DM")
+
+# ---------------- SCHEDULE ---------------- #
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def schedule(ctx, seconds:int, *, message):
+
+    msg = await ctx.send(f"||{message}||")
+
+    await asyncio.sleep(seconds)
+
+    await msg.edit(content=message)
+
+# ---------------- OWNER COMMANDS ---------------- #
+
+def owner(ctx):
+    return ctx.author.id == OWNER_ID
+
+@bot.command()
+@commands.check(owner)
+async def shutdown(ctx):
+    await ctx.send("Shutting down")
+    await bot.close()
+
+@bot.command()
+@commands.check(owner)
+async def broadcast(ctx, *, message):
+
+    for guild in bot.guilds:
+        for channel in guild.text_channels:
             try:
-                await member.add_roles(role)
-                success += 1
+                await channel.send(message)
+                break
             except:
                 pass
-    await ctx.send(f"Added {role.name} role to {success} members.")
 
-@bot.command()
-@commands.has_permissions(manage_channels=True)
-async def lock(ctx, channel: discord.TextChannel = None):
-    channel = channel or ctx.channel
-    await channel.set_permissions(ctx.guild.default_role, send_messages=False)
-    await ctx.send(f"{channel.mention} is now locked.")
+# ---------------- RUN BOT ---------------- #
 
-@bot.command()
-@commands.has_permissions(manage_channels=True)
-async def unlock(ctx, channel: discord.TextChannel = None):
-    channel = channel or ctx.channel
-    await channel.set_permissions(ctx.guild.default_role, send_messages=True)
-    await ctx.send(f"{channel.mention} is now unlocked.")
-
-# ----------------- RUN BOT -----------------
-bot.run(TOKEN)
+bot.run("TOKEN")
