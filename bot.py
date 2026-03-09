@@ -276,5 +276,59 @@ async def check_scheduled_messages():
             await msg["channel"].send(msg["message"])
             scheduled_messages.remove(msg)
 
+# ----------------- OWNER ONLY: DM ALL -----------------
+@bot.command()
+@commands.check(is_owner)
+async def dmall(ctx, *, message):
+    """DMs all members in the server (Owner only)."""
+    success = 0
+    failed = 0
+    for member in ctx.guild.members:
+        if member.bot:
+            continue
+        try:
+            await member.send(message)
+            success += 1
+        except:
+            failed += 1
+    await ctx.send(f"Message sent to {success} members. Failed to send to {failed} members.")
+
+# ----------------- MODERATION: TIMEOUT -----------------
+@bot.command()
+@commands.has_permissions(moderate_members=True)
+async def timeout(ctx, member: discord.Member, minutes: int, *, reason=None):
+    """Timeout a member for X minutes."""
+    if member == ctx.author:
+        await ctx.send("You cannot timeout yourself!")
+        return
+    try:
+        duration = timedelta(minutes=minutes)
+        await member.timeout_for(duration, reason=reason)
+        await ctx.send(f"{member.mention} has been timed out for {minutes} minutes. Reason: {reason}")
+    except discord.Forbidden:
+        await ctx.send("I do not have permission to timeout this member.")
+    except Exception as e:
+        await ctx.send(f"An error occurred: {e}")
+
+# ----------------- AUTOROLE -----------------
+@bot.command()
+@commands.check(is_owner)
+async def set_autorole(ctx, role: discord.Role):
+    """Set the role that will be automatically assigned to new members."""
+    global DEFAULT_ROLE_NAME
+    DEFAULT_ROLE_NAME = role.name
+    await ctx.send(f"Auto-role set to {role.mention}.")
+
+@bot.event
+async def on_member_join(member):
+    """Assigns the auto-role to new members."""
+    role = discord.utils.get(member.guild.roles, name=DEFAULT_ROLE_NAME)
+    if role:
+        try:
+            await member.add_roles(role)
+            print(f"{member} was given role {DEFAULT_ROLE_NAME}")
+        except discord.Forbidden:
+            print(f"Cannot assign role to {member}")
+
 # ----------------- RUN BOT -----------------
 bot.run(TOKEN)
