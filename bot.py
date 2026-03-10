@@ -34,57 +34,86 @@ async def on_ready():
     print(f"Bot online as {bot.user}")
     if not check_scheduled_messages.is_running():
         check_scheduled_messages.start()
-        
-# ----------------- OWNER ONLY COMMANDS -----------------
-@bot.command()
-@commands.check(is_owner)
-async def ping(ctx):
-    await ctx.send(f"Pong! {round(bot.latency*1000)}ms")
+
+# ----------------- OWNER / CO-OWNER COMMANDS -----------------
 
 @bot.command()
-@commands.check(is_owner)
+@commands.check(is_owner_or_co)
+async def ping(ctx):
+    """Check bot latency."""
+    await ctx.send(f"Pong! {round(bot.latency*1000)}ms")
+
+
+@bot.command()
+@commands.check(is_owner_or_co)
 async def lock(ctx, channel: discord.TextChannel = None):
+    """Lock a channel."""
     channel = channel or ctx.channel
     await channel.set_permissions(ctx.guild.default_role, send_messages=False)
     await ctx.send(f"{channel.mention} has been locked 🔒")
 
+
 @bot.command()
-@commands.check(is_owner)
+@commands.check(is_owner_or_co)
 async def unlock(ctx, channel: discord.TextChannel = None):
+    """Unlock a channel."""
     channel = channel or ctx.channel
     await channel.set_permissions(ctx.guild.default_role, send_messages=True)
     await ctx.send(f"{channel.mention} has been unlocked 🔓")
 
-# ----------------- SHUTDOWN / DISABLE -----------------
+
 @bot.command()
-@commands.check(is_owner)
+@commands.check(is_owner_or_co)
 async def shutdown(ctx):
-    """Shuts down the bot (owner only)."""
-    await ctx.send("Shutting down... Bye! 👋")
+    """Shutdown the bot."""
+    await ctx.send("Shutting down the bot...")
     await bot.close()
 
+
 @bot.command()
-@commands.check(is_owner)
+@commands.check(is_owner_or_co)
 async def disable_user(ctx, user: discord.Member):
-    """Prevents a user from using commands."""
+    """Disable a user from using commands."""
     disabled_users.add(user.id)
-    await ctx.send(f"{user} has been disabled from using bot commands.")
+    await ctx.send(f"{user.mention} has been disabled from using bot commands.")
+
 
 @bot.command()
-@commands.check(is_owner)
+@commands.check(is_owner_or_co)
 async def enable_user(ctx, user: discord.Member):
-    """Re-enables a previously disabled user."""
+    """Enable a previously disabled user."""
     disabled_users.discard(user.id)
-    await ctx.send(f"{user} can now use bot commands again.")
+    await ctx.send(f"{user.mention} can now use bot commands again.")
 
-# Global check for disabled users
-@bot.check
-async def global_disabled_check(ctx):
-    if ctx.author.id in disabled_users:
-        await ctx.send("You are temporarily disabled from using the bot.")
-        return False
-    return True
 
+@bot.command()
+@commands.check(is_owner_or_co)
+async def dmall(ctx, *, message):
+    """Send a DM to all server members."""
+    success = 0
+    failed = 0
+
+    for member in ctx.guild.members:
+        if member.bot:
+            continue
+
+        try:
+            await member.send(message)
+            success += 1
+        except:
+            failed += 1
+
+    await ctx.send(f"DM sent to {success} members. Failed: {failed}")
+
+
+@bot.command()
+@commands.check(is_owner_or_co)
+async def set_autorole(ctx, role: discord.Role):
+    """Set the auto-role for new members."""
+    global DEFAULT_ROLE_NAME
+    DEFAULT_ROLE_NAME = role.name
+    await ctx.send(f"Autorole set to {role.mention}")
+        
 # ----------------- CLIP COMMAND -----------------
 @bot.command()
 async def clip(ctx, message_id: int, channel: discord.TextChannel = None):
