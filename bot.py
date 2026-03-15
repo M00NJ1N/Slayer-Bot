@@ -1,4 +1,4 @@
-# ---------------- Part 1: Setup, Config, Databases, and Helper Functions ----------------
+# ---------------- Part 1: Setup, Config, Databases & Helper Functions ----------------
 
 import os
 import discord
@@ -8,7 +8,7 @@ import asyncio
 import random
 from datetime import datetime, timedelta
 
-# ---------------- CONFIG ----------------
+# ----------------- CONFIG -----------------
 TOKEN = os.getenv("TOKEN") or "YOUR_BOT_TOKEN_HERE"
 COMMAND_PREFIX = "!"
 OWNER_ID = 1169273992289456341
@@ -17,66 +17,66 @@ DEFAULT_ROLE_NAME = "Member"
 LOG_CHANNEL_NAME = "bot-logs"
 WELCOME_CHANNEL_NAME = "arrivals"
 
+# ----------------- INTENTS & BOT -----------------
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=COMMAND_PREFIX, intents=intents, help_command=None)
-tree = bot.tree  # for slash commands
+tree = bot.tree  # For slash commands
 
-# ---------------- DATABASE SIMULATION ----------------
+# ----------------- DATABASE SIMULATION -----------------
 # Economy
-money_data = {}
-daily_claimed = {}
+money_data = {}           # user_id -> balance
+daily_claimed = {}        # user_id -> last daily claim timestamp
 
 # Levels / XP
-xp_data = {}
-level_data = {}
+xp_data = {}              # user_id -> total XP
+level_data = {}           # user_id -> current level
 
 # Moderation
-warn_data = {}
-disabled_users = set()
+warn_data = {}            # user_id -> total warns
+disabled_users = set()    # user_ids disabled from bot
 
 # Invite tracking
-invite_cache = {}   # guild_id -> {invite_code: uses}
-invite_data = {}    # inviter_id -> total invites
+invite_cache = {}         # guild_id -> {invite_code: uses}
+invite_data = {}          # inviter_id -> total invites
 
 # Giveaways
-giveaways = {}  # guild_id -> giveaway info
+giveaways = {}            # guild_id -> giveaway info
 
 # Scheduled messages
-scheduled_messages = []
+scheduled_messages = []   # list of {channel, message, time}
 
 # Autorole
-autorole_id = None
+autorole_id = None        # role ID to assign automatically
 
-# Reaction / Mini-games
+# Mini-games
 reaction_games = {}
 tictactoe_games = {}
 blackjack_games = {}
 
-# ---------------- HELPER FUNCTIONS ----------------
-def is_owner(user):
+# ----------------- HELPER FUNCTIONS -----------------
+def is_owner(user: discord.User):
+    """Check if user is the bot owner."""
     return user.id == OWNER_ID
 
-def is_owner_or_co(user):
+def is_owner_or_co(user: discord.User):
+    """Check if user is the owner or co-owner."""
     return user.id in [OWNER_ID, CO_OWNER_ID]
 
 def add_xp(user_id: int, amount: int = None):
-    """Add XP and handle level-ups. Returns (leveled_up, new_level)"""
+    """Add XP to a user; returns (leveled_up: bool, new_level: int)."""
     amount = amount or random.randint(5, 15)
     xp_data[user_id] = xp_data.get(user_id, 0) + amount
     current_level = level_data.get(user_id, 0)
-    required_xp = int(100 * (1.5 ** current_level))  # exponentially harder
-    leveled_up = False
-    new_level = current_level
-    while xp_data[user_id] >= required_xp:
+    # Level up threshold grows exponentially
+    required_xp = int(100 * (1.5 ** current_level))
+    if xp_data[user_id] >= required_xp:
         xp_data[user_id] -= required_xp
-        current_level += 1
-        new_level = current_level
-        leveled_up = True
-        required_xp = int(100 * (1.5 ** current_level))
-    level_data[user_id] = current_level
-    return leveled_up, new_level
+        level_data[user_id] = current_level + 1
+        return True, current_level + 1
+    return False, current_level
 
 async def get_log_channel(guild: discord.Guild):
+    """Return or create a log channel for the guild."""
     channel = discord.utils.get(guild.text_channels, name=LOG_CHANNEL_NAME)
     if not channel:
         overwrites = {
@@ -87,22 +87,28 @@ async def get_log_channel(guild: discord.Guild):
     return channel
 
 async def log_action(guild: discord.Guild, message: str):
+    """Send a log message to the guild's log channel."""
     channel = await get_log_channel(guild)
     await channel.send(message)
 
-# ---------------- EVENTS ----------------
+# ----------------- CORE EVENTS -----------------
 @bot.event
 async def on_ready():
+    """Bot startup: cache invites, start loops, sync slash commands."""
     print(f"🚀 Bot online as {bot.user}")
-    # Start scheduled messages loop
+    
+    # Start loops
     if not check_scheduled_messages.is_running():
         check_scheduled_messages.start()
     if not check_giveaways.is_running():
         check_giveaways.start()
+    
     # Cache invites
     for guild in bot.guilds:
         invites = await guild.invites()
         invite_cache[guild.id] = {i.code: i.uses for i in invites}
+
+    # Sync slash commands
     try:
         await tree.sync()
         print("✅ Slash commands synced.")
@@ -111,21 +117,23 @@ async def on_ready():
 
 @bot.event
 async def on_invite_create(invite):
+    """Update invite cache when a new invite is created."""
     invite_cache[invite.guild.id] = {i.code: i.uses for i in await invite.guild.invites()}
 
 @bot.event
 async def on_invite_delete(invite):
+    """Update invite cache when an invite is deleted."""
     invite_cache[invite.guild.id] = {i.code: i.uses for i in await invite.guild.invites()}
 
 @bot.event
-async def on_message(message):
+async def on_message(message: discord.Message):
+    """Add XP for messages, skip bots/disabled users, and process commands."""
     if message.author.bot or message.author.id in disabled_users:
         return
     leveled_up, new_level = add_xp(message.author.id)
     if leveled_up:
         await message.channel.send(f"🎉 {message.author.mention} leveled up to **{new_level}**!")
-    await bot.process_commands(message)
-    
+    await bot.process_commands(message)    
 # ---------------- Part 2: Owner / Co-Owner Commands & Admin Utilities ----------------
 
 # ---------------- OWNER / CO-OWNER COMMANDS ----------------
