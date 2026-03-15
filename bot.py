@@ -15,7 +15,7 @@ ARRIVAL_CHANNEL_NAME = "arrivals"
 
 intents = discord.Intents.all()
 
-bot = commands.Bot(command_prefix=PREFIX, intents=intents)
+bot = commands.Bot(command_prefix=COMMAND_PREFIX, intents=intents, help_command=None)
 
 # ---------------- DATABASES ----------------
 
