@@ -1,63 +1,65 @@
+import os
 import discord
 from discord.ext import commands, tasks
-import os
 import random
 from datetime import datetime, timedelta
 
+# ----------------- CONFIG -----------------
 TOKEN = os.getenv("TOKEN") or "YOUR_TOKEN_HERE"
-
-PREFIX = "!"
-
+COMMAND_PREFIX = "!"
 OWNER_ID = 1169273992289456341
 CO_OWNER_ID = 958273785037983754
-
-ARRIVAL_CHANNEL_NAME = "arrivals"
+DEFAULT_ROLE_NAME = "Member"
+WELCOME_CHANNEL_NAME = "arrivals"
+LOGS_CHANNEL_NAME = "bot-logs"
 
 intents = discord.Intents.all()
-
 bot = commands.Bot(command_prefix=COMMAND_PREFIX, intents=intents, help_command=None)
 
-# ---------------- DATABASES ----------------
-
-money_data = {}
-daily_claimed = {}
-warn_data = {}
-blackjack_games = {}
-
+# ----------------- DATABASES / VARIABLES -----------------
+# XP and levels
 xp = {}
 levels = {}
 
-disabled_users = set()
+# Economy
+money_data = {}
+daily_claimed = {}
 
+# Moderation
+warn_data = {}
+disabled_users = set()
+member_disabled = {}
+
+# Autorole
 autorole_id = None
 
-invite_cache = {}
+# Invites tracking
+invite_cache = {}  # cached invites per guild
+invite_data = {}   # total invites per user
 
-invite_data = {}
-
+# Giveaways
 giveaways = {}
 
+# Scheduled messages
 scheduled_messages = []
 
-# ---------------- HELPER FUNCTIONS ----------------
+# Mini-games
+blackjack_games = {}
+tictactoe_games = {}
+reaction_games = {}
+
+# ----------------- HELPER FUNCTIONS -----------------
+def is_owner(user):
+    return user.id == OWNER_ID
 
 def is_owner_or_co(user):
-    return user.id == OWNER_ID or user.id == CO_OWNER_ID
-
+    return user.id in [OWNER_ID, CO_OWNER_ID]
 
 def add_xp(user_id):
-
     xp[user_id] = xp.get(user_id, 0) + random.randint(5, 15)
 
-    level = levels.get(user_id, 0)
-
-    if xp[user_id] >= (level + 1) * 100:
-        levels[user_id] = level + 1
-        return True
-
-    return False
-
-
+def get_level(user_id):
+    return xp.get(user_id, 0) // 100  # Example: 100 XP = 1 level
 # ---------------- EVENTS ----------------
 
 @bot.event
