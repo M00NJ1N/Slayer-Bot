@@ -160,40 +160,155 @@ async def on_member_remove(member):
 
         await arrivals.send(embed=embed)
         
-  # ---------------- OWNER COMMANDS ----------------
+# ----------------- OWNER / CO-OWNER COMMANDS -----------------
+@bot.command()
+async def ping(ctx):
+    """Check bot latency."""
+    if not is_owner_or_co(ctx.author):
+        await ctx.send("You cannot use this command.")
+        return
+    await ctx.send(f"Pong! Latency: {round(bot.latency*1000)}ms")
 
 @bot.command()
 async def shutdown(ctx):
+    """Shutdown the bot (Owner/Co-owner)."""
     if not is_owner_or_co(ctx.author):
         await ctx.send("You cannot use this command.")
         return
-
-    await ctx.send("Shutting down bot...")
+    await ctx.send("Shutting down...")
     await bot.close()
 
-
 @bot.command()
-async def disableuser(ctx, member: discord.Member):
+async def disable_user(ctx, member: discord.Member):
+    """Disable a user from using bot commands."""
     if not is_owner_or_co(ctx.author):
         await ctx.send("You cannot use this command.")
         return
-
     disabled_users.add(member.id)
-
-    await ctx.send(f"{member} can no longer use bot commands.")
-
+    await ctx.send(f"{member} has been disabled from using commands.")
 
 @bot.command()
-async def enableuser(ctx, member: discord.Member):
+async def enable_user(ctx, member: discord.Member):
+    """Re-enable a previously disabled user."""
     if not is_owner_or_co(ctx.author):
         await ctx.send("You cannot use this command.")
         return
-
     disabled_users.discard(member.id)
+    await ctx.send(f"{member} can now use the bot again.")
 
-    await ctx.send(f"{member} can use bot commands again.")
+@bot.command()
+async def broadcast(ctx, *, message):
+    """Broadcast a message to all servers (Owner/Co-owner)."""
+    if not is_owner_or_co(ctx.author):
+        await ctx.send("You cannot use this command.")
+        return
+    count = 0
+    for guild in bot.guilds:
+        for channel in guild.text_channels:
+            try:
+                await channel.send(message)
+                count += 1
+                break
+            except:
+                continue
+    await ctx.send(f"Broadcast sent to {count} channels.")
 
+@bot.command()
+async def lock(ctx, channel: discord.TextChannel = None):
+    """Lock a channel (Owner/Co-owner)."""
+    if not is_owner_or_co(ctx.author):
+        await ctx.send("You cannot use this command.")
+        return
+    channel = channel or ctx.channel
+    await channel.set_permissions(ctx.guild.default_role, send_messages=False)
+    await ctx.send(f"{channel.mention} has been locked 🔒")
 
+@bot.command()
+async def unlock(ctx, channel: discord.TextChannel = None):
+    """Unlock a channel (Owner/Co-owner)."""
+    if not is_owner_or_co(ctx.author):
+        await ctx.send("You cannot use this command.")
+        return
+    channel = channel or ctx.channel
+    await channel.set_permissions(ctx.guild.default_role, send_messages=True)
+    await ctx.send(f"{channel.mention} has been unlocked 🔓")
+
+@bot.command()
+async def setbalance(ctx, member: discord.Member, amount: int):
+    """Set a user's coins (Owner/Co-owner)."""
+    if not is_owner_or_co(ctx.author):
+        await ctx.send("You cannot use this command.")
+        return
+    money_data[member.id] = amount
+    await ctx.send(f"{member}'s balance set to {amount} coins.")
+
+@bot.command()
+async def dmall(ctx, *, message):
+    """Send a DM to everyone in the server."""
+    if not is_owner_or_co(ctx.author):
+        await ctx.send("You cannot use this command.")
+        return
+    sent = 0
+    for member in ctx.guild.members:
+        if not member.bot:
+            try:
+                await member.send(message)
+                sent += 1
+            except:
+                continue
+    await ctx.send(f"DM sent to {sent} members.")
+
+@bot.command()
+async def reroll_giveaway(ctx, guild_id: int):
+    """Reroll the winner of a giveaway (Owner/Co-owner)."""
+    if not is_owner_or_co(ctx.author):
+        await ctx.send("You cannot use this command.")
+        return
+    if guild_id not in giveaways:
+        await ctx.send("No giveaway found for this server.")
+        return
+    data = giveaways[guild_id]
+    if not data['entries']:
+        await ctx.send("No entries to reroll.")
+        return
+    winner = random.choice(list(data['entries']))
+    await data['channel'].send(f"🎉 New winner: {winner.mention}")
+    await ctx.send("Giveaway rerolled successfully.")
+
+@bot.command()
+async def set_autorole(ctx, role: discord.Role):
+    """Set the role given to new members automatically."""
+    if not is_owner_or_co(ctx.author):
+        await ctx.send("You cannot use this command.")
+        return
+    global autorole_id
+    autorole_id = role.id
+    await ctx.send(f"Autorole set to {role.name}")
+
+@bot.command()
+async def invite_leaderboard(ctx):
+    """Show invite leaderboard (Owner/Co-owner)."""
+    if not is_owner_or_co(ctx.author):
+        await ctx.send("You cannot use this command.")
+        return
+    leaderboard = sorted(invite_data.items(), key=lambda x: x[1], reverse=True)[:10]
+    embed = discord.Embed(title="Top Inviters", color=discord.Color.purple())
+    for i, (user_id, count) in enumerate(leaderboard, 1):
+        member = ctx.guild.get_member(user_id)
+        if member:
+            embed.add_field(name=f"{i}. {member}", value=f"Invites: {count}", inline=False)
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def clean_messages(ctx, keyword: str = None, limit: int = 100):
+    """Advanced purge: delete messages containing keyword."""
+    if not is_owner_or_co(ctx.author):
+        await ctx.send("You cannot use this command.")
+        return
+    def check(m):
+        return keyword.lower() in m.content.lower() if keyword else True
+    deleted = await ctx.channel.purge(limit=limit, check=check)
+    await ctx.send(f"Deleted {len(deleted)} messages.")
 # ---------------- DM ALL COMMAND ----------------
 
 @bot.command()
